@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HYBRID AI TITAN</title>
+<style>
+*{box-sizing:border-box;font-family:monospace}
+body{margin:0;height:100dvh;position:fixed;inset:0;background:#090d16;color:#fff;display:flex;flex-direction:column}
+#top{background:#0f172a;padding:10px;display:flex;justify-content:space-between;align-items:center}
+.title{color:#38bdf8;font-weight:bold}
+#resetBtn{background:#1e293b;color:#f87171;border:1px solid #f87171;border-radius:6px;padding:5px 10px}
+#chat{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+.msg{max-width:85%;padding:10px;border-radius:10px;font-size:13px;line-height:1.4}
+.user{align-self:flex-end;background:#0284c7}
+.ai{align-self:flex-start;background:#1e293b;border:1px solid #334155}
+.tag{display:block;font-size:10px;color:#38bdf8;margin-bottom:4px}
+.btn-sm{display:inline-block;margin-top:6px;color:#facc15;border:1px solid #facc15;border-radius:4px;padding:3px 7px;font-size:11px}
+#bar{background:#0f172a;padding:8px;display:flex;gap:8px}
+#inp{flex:1;background:#1e293b;color:#fff;border:1px solid #334155;border-radius:8px;padding:10px;font-size:14px}
+#send{background:#38bdf8;color:#000;border:none;border-radius:8px;padding:0 16px;font-weight:bold}
+</style>
+</head>
+<body>
+<div id="top">
+  <div>
+    <div class="title">HYBRID AI TITAN</div>
+    <div style="font-size:11px;color:#94a3b8">Слов: <span id="wCnt">0</span> | Фраз: <span id="pCnt">0</span> | Вики: <span id="fCnt">0</span></div>
+  </div>
+  <button id="resetBtn">СБРОС</button>
+</div>
+<div id="chat"></div>
+<div id="bar">
+  <input id="inp" type="text" placeholder="Напиши сообщение...">
+  <button id="send">➤</button>
+</div>
+<script>
+const chat = document.getElementById('chat');
+const inp = document.getElementById('inp');
+let brain = JSON.parse(localStorage.getItem('hybrid_ai_v5')) || { chains: {}, facts: {}, customReplies: [], concepts: {} };
+if (!brain.concepts) brain.concepts = {};
+let lastCtx = '';
+
+function saveBrain() {
+  localStorage.setItem('hybrid_ai_v5', JSON.stringify(brain));
+  document.getElementById('wCnt').textContent = Object.keys(brain.chains).length;
+  document.getElementById('pCnt').textContent = brain.customReplies.length + Object.keys(brain.concepts).length;
+  document.getElementById('fCnt').textContent = Object.keys(brain.facts).length;
+}
+
+function clean(t) {
+  return t.toLowerCase().replace(/[!?.,«»"']/g, '').trim();
+}
+
+function getReply(raw) {
+  let text = raw.trim();
+  if (text.toLowerCase().startsWith('ладно')) {
+    text = text.slice(5).replace(/^[,.\s-]+/, '').trim() || text;
+  }
+  const low = clean(text);
+
+  const mathStr = text.toLowerCase().replace(/×|х/g, '*').replace(/÷|:/g, '/').replace(/[^0-9+\-*/().]/g, '');
+  if (mathStr && /[0-9]/.test(mathStr) && /[+\-*/]/.test(mathStr)) {
+    try {
+      const res = Function('return (' + mathStr + ')')();
+      if (typeof res === 'number' && isFinite(res)) {
+        return 'Посчитал: ' + mathStr + ' = ' + Number(res.toFixed(6));
+      }
+    } catch (e) {}
+  }
+
+  if (['тупой', 'глупый', 'дурак', 'плохо', 'неправильно', 'фигня', 'хрень'].some(w => low.includes(w))) {
+    return 'Извини, я ещё только учусь! Нажми [+] Переучить под моим ответом, чтобы исправить меня.';
+  }
+
+  if (text.includes('— это ') || text.includes('- это ') || text.includes(' это ')) {
+    const parts = text.split(/\s*[-—]?\s*это\s+/i);
+    if (parts.length >= 2 && !low.startsWith('что') && !low.startsWith('кто')) {
+      const term = clean(parts.at(0));
+      const mean = parts.slice(1).join(' это ').trim();
+      brain.concepts[term] = mean;
+      saveBrain();
+      return 'Записал в память! «' + term + '» — это ' + mean;
+    }
+  }
+  if (low.includes('что ты знаешь')) {
+    const keys = Object.keys(brain.concepts);
+    return keys.length ? 'Я знаю: ' + keys.join(', ') : 'Личный словарь пока пуст.';
+  }
+
+  for (let key in brain.concepts) {
+    if (low.includes('что такое ' + key) || low.includes('кто такой ' + key) || low.includes('объясни ' + key)) {
+      return 'Ты сам меня научил: «' + key + '» — это ' + brain.concepts[key];
+    }
+  }
+
+  for (let item of brain.customReplies) {
+    if (item.q === low) return item.a;
+  }
+
+  if (['молодец', 'круто', 'супер', 'красава', 'спасибо', 'спс'].some(w => low.includes(w))) {
+    return 'Спасибо! Стараюсь становиться умнее с каждым обновлением.';
+  }
+
+  if (low.includes('шутк') || low.includes('анекдот')) {
+    const jokes = [
+      'Идёт медведь по лесу, видит — машина горит. Сел в неё и сгорел.',
+      'Сын спрашивает папу-программиста: «Почему солнце встаёт на востоке?». Папа: «Работает — не трогай!»',
+      'Попугай кричит коту: «Кеша хороший!». Кот лениво: «Зато я молчать умею».'
+    ];
+    return jokes.at(Math.floor(Math.random() * jokes.length));
+  }
+
+  if ((low.includes('твой создател') || low.includes('тебя создал') || low.includes('тебя сделал') || low === 'кто создатель') && !low.includes('openai')) {
+    return 'Мой создатель — это ты! Ты написал мой код в Acode.';
+  }
+  if (low.includes('зовут') || low.includes('имя')) {
+    return 'Меня зовут HYBRID AI TITAN!';
+  }
+  if (['привет', 'хай', 'ку', 'здарова', 'пр'].includes(low)) {
+    return 'Привет! TITAN на связи и готов общаться!';
+  }
+
+  return 'Пока не знаю ответа. Объясни через «Слово — это ...» или нажми [+] Переучить!';
+}
+
+function addMsg(txt, isUser, tag, qTeach) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + (isUser ? 'user' : 'ai');
+  if (tag) {
+    const s = document.createElement('span');
+    s.className = 'tag';
+    s.textContent = tag;
+    div.appendChild(s);
+  }
+  const b = document.createElement('span');
+  b.textContent = txt;
+  div.appendChild(b);
+
+  if (!isUser && qTeach) {
+    const btn = document.createElement('div');
+    btn.className = 'btn-sm';
+    btn.textContent = '[+] Переучить';
+    btn.onclick = () => {
+      const ans = prompt('Как ответить на: ' + qTeach);
+      if (ans && ans.trim()) {
+        brain.customReplies.push({ q: clean(qTeach), a: ans.trim() });
+        saveBrain();
+        b.textContent = ans.trim();
+        btn.remove();
+      }
+    };
+    div.appendChild(btn);
+  }
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
+async function handleSend() {
+  const txt = inp.value.trim();
+  if (!txt) return;
+  inp.value = '';
+  addMsg(txt, true);
+
+  const low = clean(txt);
+  const isAboutBot = low.includes('тебя') || low.includes('твой') || low.includes('твоё') || low.includes('ты ');
+  const wikiRegex = /^(что такое|кто такой|кто такая|кто такие|кто создатель|кто создал|кто придумал|кто изобрел|расскажи про|расскажи о|информация о|где находится)\s+/;
+  const isWiki = !isAboutBot && wikiRegex.test(low);
+  const topic = low.replace(wikiRegex, '').trim();
+
+  if (isWiki && topic && !brain.concepts[topic]) {
+    if (brain.facts[topic]) {
+      const saved = brain.facts[topic];
+      const factText = typeof saved === 'string' 
+        ? saved 
+        : (saved.text || saved.extract || saved.info || JSON.stringify(saved));
+      addMsg(factText, false, '[ВИКИ ПАМЯТЬ]', txt);
+      return;
+    }
+
+        try {
+      const url = 'https://wikipedia.org' + encodeURIComponent(topic) + '&gsrlimit=1&prop=extracts&exintro=1&explaintext=1&format=json&origin=*';
+      const res = await fetch(url);
+      const d = await res.json();
+      if (d && d.extract) {
+        const info = d.extract.slice(0, 300) + '...';
+        brain.facts[topic] = info;
+        saveBrain();
+        addMsg(info, false, '[ВИКИ] ' + d.title, txt);
+        return;
+      }
+    } catch (e) {}
+
+    addMsg(getReply(txt), false, '[ЧАТ]', txt);
+    return;
+  }
+
+  addMsg(getReply(txt), false, '[ЧАТ]', txt);
+}
+    
+document.getElementById('send').onclick = handleSend;
+inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleSend(); });
+document.getElementById('resetBtn').onclick = () => {
+  if (confirm('Очистить память?')) {
+    brain = { chains: {}, facts: {}, customReplies: [], concepts: {} };
+    saveBrain();
+    chat.innerHTML = '';
+  }
+};
+
+saveBrain();
+addMsg('Привет! Я HYBRID AI TITAN. Система полностью чиста и готова к работе!', false);
+</script>
+</body>
+</html>
